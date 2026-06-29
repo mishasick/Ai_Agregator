@@ -1,1 +1,14 @@
-
+{
+  "users": {
+    "admin": {
+      "password": "admin123",
+      "premium_until": null,
+      "createdAt": "2026-06-29"
+    },
+    "misharefev": {
+      "password": "123456",
+      "premium_until": null,
+      "createdAt": "2026-06-29"
+    }
+  }
+}
