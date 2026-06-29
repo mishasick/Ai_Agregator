@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ИИ-Агрегатор | Google Sheets БД</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, monospace;
+            background: linear-gradient(135deg, #0a0f2a, #0a1a2a);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(15,25,45,0.9);
+            border-radius: 32px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .login-box {
+            max-width: 400px;
+            margin: 50px auto;
+            background: rgba(10,20,35,0.8);
+            border-radius: 24px;
+            padding: 30px;
+            text-align: center;
+            border: 2px solid #ffd700;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 40px;
+            background: #0a0f1e;
+            border: 1px solid #2a3a5a;
+            color: white;
+        }
+        button {
+            background: linear-gradient(135deg, #ffd700, #ff8c00);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 40px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .chat-area {
+            display: flex;
+            flex-direction: column;
+            height: 60vh;
+        }
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .message {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .bubble {
+            background: rgba(255,255,255,0.1);
+            padding: 10px 15px;
+            border-radius: 18px;
+            max-width: 70%;
+        }
+        .user-bubble {
+            background: #4c9aff;
+            margin-left: auto;
+        }
+        .input-area {
+            display: flex;
+            gap: 10px;
+            padding: 15px;
+        }
+        .input-area input {
+            flex: 1;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 40px;
+            font-size: 0.7rem;
+        }
+        .premium { background: #ffd700; color: #1a1a2a; }
+        .free { background: #1e2a3a; color: #8aa0c0; }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1a2a;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 40px;
+            animation: fadeOut 3s forwards;
+        }
+        @keyframes fadeOut {
+            0% { opacity: 1; }
+            70% { opacity: 1; }
+            100% { opacity: 0; visibility: hidden; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div id="app"></div>
+</div>
+
+<script>
+    // ========== GOOGLE SHEETS API НАСТРОЙКИ ==========
+    // ВСТАВЬ СЮДА СВОЙ WEB APP URL ПОСЛЕ ПУБЛИКАЦИИ!
+    const SCRIPT_URL = https://script.google.com/macros/s/AKfycbxQya1FE8HO9OY_hulxGe_LaYFRJDzCyalZWlCaxR0-nVPdx3tkC_BhJv97hUsrAG0U/exec"https://script.google.com/macros/s/ТВОЙ_СКРИПТ_ID/exec";
+    
+    // API KEY для OpenRouter
+    const API_KEY = "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";
+    const PREMIUM_CODE = "365099";
+    
+    let currentUser = null;
+    let premiumUntil = null;
+    let messages = [];
+    let isWaiting = false;
+    
+    // ========== РАБОТА С GOOGLE SHEETS ==========
+    async function callGoogleSheets(action, data = {}) {
+        try {
+            const response = await fetch(SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors', // Важно для Google Apps Script
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ action, ...data })
+            });
+            const result = await response.text();
+            return JSON.parse(result);
+        } catch(e) {
+            console.error('Ошибка:', e);
+            return { success: false, error: e.message };
+        }
+    }
+    
+    // Регистрация
+    async function register(username, password) {
+        const result = await callGoogleSheets('register', { username, password });
+        if(result.success) {
+            currentUser = username;
+            localStorage.setItem('session_user', username);
+            showToast('✅ Регистрация успешна!');
+            renderChatInterface();
+        } else {
+            showToast('❌ ' + result.error);
+        }
+    }
+    
+    // Вход
+    async function login(username, password) {
+        const result = await callGoogleSheets('login', { username, password });
+        if(result.success) {
+            currentUser = username;
+            premiumUntil = result.premium_until;
+            localStorage.setItem('session_user', username);
+            showToast('🎉 Добро пожаловать!');
+            renderChatInterface();
+        } else {
+            showToast('❌ ' + result.error);
+        }
+    }
+    
+    // Активация премиума
+    async function activatePremium(code) {
+        if(code !== PREMIUM_CODE) {
+            showToast('❌ Неверный код!');
+            return false;
+        }
+        const result = await callGoogleSheets('activate_premium', { username: currentUser });
+        if(result.success) {
+            premiumUntil = result.premium_until;
+            showToast('👑 Премиум активирован на 30 дней!');
+            renderChatInterface();
+            return true;
+        }
+        return false;
+    }
+    
+    // Выход
+    function logout() {
+        currentUser = null;
+        premiumUntil = null;
+        localStorage.removeItem('session_user');
+        messages = [];
+        renderLoginInterface();
+    }
+    
+    // ========== ЧАТ С ИИ ==========
+    async function sendMessage(text) {
+        if(isWaiting) { showToast('⏳ Подожди...'); return; }
+        if(!currentUser) { showToast('🔐 Сначала войдите!'); return; }
+        
+        // Добавляем сообщение пользователя
+        addMessage(text, true);
+        
+        isWaiting = true;
+        
+        const typingDiv = document.createElement('div');
+        typingDiv.className = 'message';
+        typingDiv.innerHTML = `<div class="bubble" style="background:rgba(255,255,255,0.05);">✍️ Печатает...</div>`;
+        document.getElementById('messages').appendChild(typingDiv);
+        scrollToBottom();
+        
+        try {
+            const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: 'deepseek/deepseek-chat:free',
+                    messages: [{ role: 'user', content: text }],
+                    temperature: 0.7,
+                    max_tokens: 1000
+                })
+            });
+            
+            typingDiv.remove();
+            const data = await response.json();
+            const answer = data.choices[0].message.content;
+            addMessage(answer, false);
+        } catch(e) {
+            typingDiv.remove();
+            addMessage('🌐 Ошибка! Попробуй позже.', false);
+        } finally {
+            isWaiting = false;
+        }
+    }
+    
+    function addMessage(text, isUser) {
+        const container = document.getElementById('messages');
+        const div = document.createElement('div');
+        div.className = 'message';
+        div.innerHTML = `<div class="bubble ${isUser ? 'user-bubble' : ''}" style="${isUser ? 'margin-left:auto; background:#4c9aff;' : ''}">${isUser ? text : marked.parse(text)}</div>`;
+        container.appendChild(div);
+        scrollToBottom();
+        messages.push({ text, isUser, time: Date.now() });
+    }
+    
+    function scrollToBottom() {
+        const container = document.getElementById('messages');
+        if(container) container.scrollTop = container.scrollHeight;
+    }
+    
+    // ========== ИНТЕРФЕЙС ==========
+    function renderLoginInterface() {
+        document.getElementById('app').innerHTML = `
+            <div class="login-box">
+                <div style="font-size: 3rem;">🤖</div>
+                <h2>ИИ-Агрегатор</h2>
+                <p style="color:#aaa;">65+ моделей | Премиум код: 365099</p>
+                <input type="text" id="loginUsername" placeholder="Имя пользователя">
+                <input type="password" id="loginPassword" placeholder="Пароль">
+                <button id="loginBtn">🔐 Войти</button>
+                <button id="registerBtn" style="background:transparent; border:1px solid #4c9aff; color:#4c9aff;">📝 Регистрация</button>
+                <p style="margin-top:15px; font-size:0.7rem; color:#888;">Данные сохраняются в Google Sheets!</p>
+            </div>
+        `;
+        
+        document.getElementById('loginBtn').onclick = () => {
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            if(username && password) login(username, password);
+            else showToast('Заполните поля');
+        };
+        
+        document.getElementById('registerBtn').onclick = () => {
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            if(username && password) register(username, password);
+            else showToast('Заполните поля');
+        };
+    }
+    
+    function renderChatInterface() {
+        document.getElementById('app').innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h1>🤖 ИИ-Агрегатор ULTRA</h1>
+                    <p>65+ моделей | Данные в облаке</p>
+                </div>
+                <div>
+                    <span class="status ${premiumUntil ? 'premium' : 'free'}">${premiumUntil ? '👑 ПРЕМИУМ' : '🆓 Бесплатно'}</span>
+                    <span style="margin:0 10px;">👤 ${currentUser}</span>
+                    <button id="logoutBtn" style="background:#ff4444; padding:6px 15px;">Выйти</button>
+                    ${!premiumUntil ? `<button id="premiumBtn" style="background:#ffd700; color:#1a1a2a; padding:6px 15px;">👑 Активировать премиум</button>` : ''}
+                </div>
+            </div>
+            <div class="chat-area">
+                <div class="messages" id="messages"></div>
+                <div class="input-area">
+                    <input type="text" id="messageInput" placeholder="Спроси что угодно...">
+                    <button id="sendBtn">➤</button>
+                </div>
+            </div>
+        `;
+        
+        // Восстанавливаем сообщения
+        const container = document.getElementById('messages');
+        messages.forEach(msg => {
+            const div = document.createElement('div');
+            div.className = 'message';
+            div.innerHTML = `<div class="bubble ${msg.isUser ? 'user-bubble' : ''}" style="${msg.isUser ? 'margin-left:auto; background:#4c9aff;' : ''}">${msg.isUser ? msg.text : marked.parse(msg.text)}</div>`;
+            container.appendChild(div);
+        });
+        
+        document.getElementById('logoutBtn').onclick = logout;
+        if(document.getElementById('premiumBtn')) {
+            document.getElementById('premiumBtn').onclick = () => {
+                const code = prompt('Введите премиум код:');
+                if(code) activatePremium(code);
+            };
+        }
+        
+        const input = document.getElementById('messageInput');
+        const send = document.getElementById('sendBtn');
+        
+        send.onclick = () => {
+            const text = input.value.trim();
+            if(text) {
+                sendMessage(text);
+                input.value = '';
+            }
+        };
+        
+        input.onkeypress = (e) => {
+            if(e.key === 'Enter') {
+                const text = input.value.trim();
+                if(text) {
+                    sendMessage(text);
+                    input.value = '';
+                }
+            }
+        };
+        
+        input.focus();
+    }
+    
+    function showToast(msg) {
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.innerText = msg;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+    
+    // Проверяем сессию при загрузке
+    const savedUser = localStorage.getItem('session_user');
+    if(savedUser) {
+        currentUser = savedUser;
+        renderChatInterface();
+    } else {
+        renderLoginInterface();
+    }
+</script>
+</body>
+</html>
